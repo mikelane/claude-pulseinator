@@ -174,7 +174,7 @@ struct DashboardView: View {
     private var signozSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Text("SigNoz")
+                Text("SigNoz · Claude Code")
                     .font(.headline)
                 Spacer()
                 Picker("Window", selection: $signoz.selectedWindow) {
@@ -190,25 +190,48 @@ struct DashboardView: View {
             }
 
             if signoz.isAvailable {
-                HStack(spacing: 8) {
-                    UsageCard(
-                        title: "Services",
-                        value: "\(signoz.services.count)",
-                        subtitle: "active",
-                        accentColor: .indigo
-                    )
-                    UsageCard(
-                        title: "Errors",
-                        value: "\(signoz.errorCount)",
-                        subtitle: signoz.selectedWindow.rawValue,
-                        accentColor: signoz.errorCount > 0 ? .red : .green
-                    )
-                    UsageCard(
-                        title: "Traces",
-                        value: compactFormatted(signoz.traceCount),
-                        subtitle: signoz.selectedWindow.rawValue,
-                        accentColor: .cyan
-                    )
+                let win = signoz.selectedWindow.rawValue
+                VStack(spacing: 8) {
+                    HStack(spacing: 8) {
+                        UsageCard(
+                            title: "Sessions",
+                            value: "\(signoz.sessions)",
+                            subtitle: win,
+                            accentColor: .purple
+                        )
+                        UsageCard(
+                            title: "Tokens",
+                            value: compactFormatted(Int(signoz.tokens)),
+                            subtitle: win,
+                            accentColor: .blue
+                        )
+                        UsageCard(
+                            title: "Cost",
+                            value: String(format: "$%.2f", signoz.costUSD),
+                            subtitle: win,
+                            accentColor: .green
+                        )
+                    }
+                    HStack(spacing: 8) {
+                        UsageCard(
+                            title: "Lines",
+                            value: "\(signoz.linesChanged)",
+                            subtitle: win,
+                            accentColor: .teal
+                        )
+                        UsageCard(
+                            title: "Commits",
+                            value: "\(signoz.commits)",
+                            subtitle: win,
+                            accentColor: .orange
+                        )
+                        UsageCard(
+                            title: "Decisions",
+                            value: "\(signoz.decisions)",
+                            subtitle: win,
+                            accentColor: .indigo
+                        )
+                    }
                 }
             } else {
                 Text("SigNoz offline")
