@@ -51,19 +51,19 @@ struct DashboardView: View {
                 UsageCard(
                     title: "Messages",
                     value: formatted(data.todayMessages),
-                    subtitle: "today",
+                    subtitle: data.todayDate,
                     accentColor: .blue
                 )
                 UsageCard(
                     title: "Sessions",
                     value: formatted(data.todaySessions),
-                    subtitle: "today",
+                    subtitle: data.todayDate,
                     accentColor: .purple
                 )
                 UsageCard(
                     title: "Tokens",
                     value: compactFormatted(data.todayTokens),
-                    subtitle: "today",
+                    subtitle: data.todayDate,
                     accentColor: .teal
                 )
             }

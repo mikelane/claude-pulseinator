@@ -9,33 +9,30 @@ struct ModelStat: Identifiable {
 }
 
 struct StatsCache: Decodable {
-    let totalMessages: Int?
-    let totalTokens: Int?
+    let lastComputedDate: String?
+    let dailyActivity: [DayActivity]?
+    let dailyModelTokens: [DayModelTokens]?
+    let modelUsage: [String: ModelUsageStats]?
     let totalSessions: Int?
-    let weekMessages: Int?
-    let weekTokens: Int?
-    let lifetimeSessions: Int?
-    let lifetimeMessages: Int?
+    let totalMessages: Int?
     let firstSessionDate: String?
-    let modelBreakdown: [ModelStatRaw]?
-
-    enum CodingKeys: String, CodingKey {
-        case totalMessages = "total_messages"
-        case totalTokens = "total_tokens"
-        case totalSessions = "total_sessions"
-        case weekMessages = "week_messages"
-        case weekTokens = "week_tokens"
-        case lifetimeSessions = "lifetime_sessions"
-        case lifetimeMessages = "lifetime_messages"
-        case firstSessionDate = "first_session_date"
-        case modelBreakdown = "model_breakdown"
-    }
 }
 
-struct ModelStatRaw: Decodable {
-    let name: String?
-    let tokens: Int?
-    let color: String?
+struct DayActivity: Decodable {
+    let date: String
+    let messageCount: Int
+    let sessionCount: Int
+    let toolCallCount: Int
+}
+
+struct DayModelTokens: Decodable {
+    let date: String
+    let tokensByModel: [String: Int]
+}
+
+struct ModelUsageStats: Decodable {
+    let inputTokens: Int?
+    let outputTokens: Int?
 }
 
 struct AnthropicUsageResponse: Decodable {
@@ -59,6 +56,7 @@ class DataProvider {
     var todayMessages: Int = 0
     var todayTokens: Int = 0
     var todaySessions: Int = 0
+    var todayDate: String = "—"
     var weekMessages: Int = 0
     var weekTokens: Int = 0
     var modelBreakdown: [ModelStat] = []
@@ -106,31 +104,95 @@ class DataProvider {
             return
         }
 
-        let decoder = JSONDecoder()
-        guard let stats = try? decoder.decode(StatsCache.self, from: data) else {
+        guard let stats = try? JSONDecoder().decode(StatsCache.self, from: data) else {
             return
         }
 
-        todayMessages = stats.totalMessages ?? 0
-        todayTokens = stats.totalTokens ?? 0
-        todaySessions = stats.totalSessions ?? 0
-        weekMessages = stats.weekMessages ?? 0
-        weekTokens = stats.weekTokens ?? 0
-        lifetimeSessions = stats.lifetimeSessions ?? 0
-        lifetimeMessages = stats.lifetimeMessages ?? 0
-        firstSessionDate = stats.firstSessionDate ?? "—"
-
-        if let breakdown = stats.modelBreakdown {
-            let palette = ["blue", "purple", "green", "orange", "red", "teal"]
-            modelBreakdown = breakdown.enumerated().compactMap { index, raw in
-                guard let name = raw.name else { return nil }
-                return ModelStat(
-                    name: name,
-                    tokens: raw.tokens ?? 0,
-                    color: raw.color ?? palette[index % palette.count]
-                )
-            }
+        // Most recent day: sort by date string (ISO format sorts lexicographically)
+        if let mostRecent = stats.dailyActivity?.sorted(by: { $0.date > $1.date }).first {
+            todayMessages = mostRecent.messageCount
+            todaySessions = mostRecent.sessionCount
+            todayDate = formatShortDate(mostRecent.date)
         }
+
+        // Today's tokens: sum tokensByModel for the most recent date
+        if let mostRecentDate = stats.dailyActivity?.sorted(by: { $0.date > $1.date }).first?.date,
+           let dayTokens = stats.dailyModelTokens?.first(where: { $0.date == mostRecentDate }) {
+            todayTokens = dayTokens.tokensByModel.values.reduce(0, +)
+        }
+
+        // Week: last 7 days relative to lastComputedDate
+        let cutoffDate = weekCutoffDate(from: stats.lastComputedDate)
+        let weekActivities = stats.dailyActivity?.filter { $0.date >= cutoffDate } ?? []
+        weekMessages = weekActivities.reduce(0) { $0 + $1.messageCount }
+
+        let weekTokenEntries = stats.dailyModelTokens?.filter { $0.date >= cutoffDate } ?? []
+        weekTokens = weekTokenEntries.reduce(0) { total, entry in
+            total + entry.tokensByModel.values.reduce(0, +)
+        }
+
+        // Model breakdown: sum input + output tokens per model, sort descending
+        if let usage = stats.modelUsage {
+            let palette = ["blue", "purple", "green", "orange", "red", "teal"]
+            modelBreakdown = usage
+                .map { name, stat in
+                    (name: name, tokens: (stat.inputTokens ?? 0) + (stat.outputTokens ?? 0))
+                }
+                .sorted { $0.tokens > $1.tokens }
+                .enumerated()
+                .map { index, pair in
+                    ModelStat(name: pair.name, tokens: pair.tokens, color: palette[index % palette.count])
+                }
+        }
+
+        // Lifetime
+        lifetimeSessions = stats.totalSessions ?? 0
+        lifetimeMessages = stats.totalMessages ?? 0
+        firstSessionDate = formatFirstSessionDate(stats.firstSessionDate)
+    }
+
+    private func weekCutoffDate(from lastComputedDate: String?) -> String {
+        let calendar = Calendar.current
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+
+        let anchor: Date
+        if let dateStr = lastComputedDate, let parsed = formatter.date(from: dateStr) {
+            anchor = parsed
+        } else {
+            anchor = Date()
+        }
+
+        let cutoff = calendar.date(byAdding: .day, value: -6, to: anchor) ?? anchor
+        return formatter.string(from: cutoff)
+    }
+
+    private func formatShortDate(_ isoDate: String) -> String {
+        let input = DateFormatter()
+        input.dateFormat = "yyyy-MM-dd"
+
+        let output = DateFormatter()
+        output.dateFormat = "MMM d"
+
+        guard let date = input.date(from: isoDate) else { return isoDate }
+        return output.string(from: date)
+    }
+
+    private func formatFirstSessionDate(_ rawDate: String?) -> String {
+        guard let raw = rawDate else { return "—" }
+
+        let iso = ISO8601DateFormatter()
+        iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+
+        let fallbackISO = ISO8601DateFormatter()
+        fallbackISO.formatOptions = [.withInternetDateTime]
+
+        let date = iso.date(from: raw) ?? fallbackISO.date(from: raw)
+        guard let date else { return raw }
+
+        let output = DateFormatter()
+        output.dateFormat = "MMM d, yyyy"
+        return output.string(from: date)
     }
 
     private func mergeFromProm() {
