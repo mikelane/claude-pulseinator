@@ -13,8 +13,7 @@ struct DashboardView: View {
     }()
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: 16) {
                 topRow
                 Divider()
                 tokenChart
@@ -27,7 +26,6 @@ struct DashboardView: View {
                 lifetimeBar
             }
             .padding(16)
-        }
         .frame(width: 720)
         .background(.ultraThinMaterial)
         .task { await refresh() }
