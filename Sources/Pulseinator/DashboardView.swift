@@ -15,6 +15,7 @@ struct DashboardView: View {
             VStack(alignment: .leading, spacing: 16) {
                 usageSummarySection
                 modelBreakdownSection
+                usageLimitsSection
                 signozSection
                 bottomBar
             }
@@ -124,6 +125,46 @@ struct DashboardView: View {
                                 )
                         }
                         .frame(height: 4)
+                    }
+                }
+            }
+        }
+    }
+
+    private var usageLimitsSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Usage Limits")
+                .font(.headline)
+
+            if data.usageLimits.isEmpty {
+                Text("No limit data — keychain token unavailable")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .padding(.vertical, 8)
+            } else {
+                ForEach(data.usageLimits, id: \.label) { limit in
+                    VStack(alignment: .leading, spacing: 3) {
+                        HStack {
+                            Text(limit.label)
+                                .font(.caption)
+                                .foregroundStyle(.primary)
+                            Spacer()
+                            if let resetsAt = limit.resetsAt {
+                                Text(resetCountdown(resetsAt))
+                                    .font(.caption2)
+                                    .foregroundStyle(.tertiary)
+                            }
+                        }
+                        HStack(spacing: 8) {
+                            ProgressView(value: limit.utilization / 100)
+                                .progressViewStyle(.linear)
+                                .tint(limitColor(limit.utilization))
+                            Text("\(Int(limit.utilization))%")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .frame(width: 30, alignment: .trailing)
+                        }
                     }
                 }
             }
@@ -264,6 +305,26 @@ struct DashboardView: View {
         case "indigo": return .indigo
         case "cyan": return .cyan
         default: return .blue
+        }
+    }
+
+    private func limitColor(_ utilization: Double) -> Color {
+        switch utilization {
+        case ..<50: return .green
+        case 50..<80: return .yellow
+        default: return .red
+        }
+    }
+
+    private func resetCountdown(_ date: Date) -> String {
+        let seconds = date.timeIntervalSinceNow
+        guard seconds > 0 else { return "resetting…" }
+        let hours = Int(seconds) / 3600
+        let minutes = (Int(seconds) % 3600) / 60
+        if hours > 0 {
+            return "resets in \(hours)h \(minutes)m"
+        } else {
+            return "resets in \(minutes)m"
         }
     }
 }

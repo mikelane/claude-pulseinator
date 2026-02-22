@@ -35,6 +35,42 @@ struct ModelUsageStats: Decodable {
     let outputTokens: Int?
 }
 
+struct LimitWindow {
+    let utilization: Double
+    let resetsAt: Date?
+    let label: String
+}
+
+struct OAuthUsageWindow: Decodable {
+    let utilization: Double?
+    let resetsAt: String?
+
+    enum CodingKeys: String, CodingKey {
+        case utilization
+        case resetsAt = "resets_at"
+    }
+}
+
+struct OAuthUsageResponse: Decodable {
+    let fiveHour: OAuthUsageWindow?
+    let sevenDay: OAuthUsageWindow?
+    let sevenDaySonnet: OAuthUsageWindow?
+
+    enum CodingKeys: String, CodingKey {
+        case fiveHour = "five_hour"
+        case sevenDay = "seven_day"
+        case sevenDaySonnet = "seven_day_sonnet"
+    }
+}
+
+struct KeychainCredentials: Decodable {
+    let claudeAiOauth: OAuthCredential?
+}
+
+struct OAuthCredential: Decodable {
+    let accessToken: String?
+}
+
 struct AnthropicUsageResponse: Decodable {
     let data: [AnthropicUsageEntry]?
 }
@@ -65,6 +101,7 @@ class DataProvider {
     var firstSessionDate: String = "—"
     var dataSource: String = "Local"
     var lastUpdated: Date = Date()
+    var usageLimits: [LimitWindow] = []
     var isLoading: Bool = false
 
     private let statsCachePath: String = {
@@ -81,12 +118,12 @@ class DataProvider {
         isLoading = true
         defer { isLoading = false }
 
-        let adminKey = ProcessInfo.processInfo.environment["ANTHROPIC_ADMIN_KEY"]
-
-        if let key = adminKey, !key.isEmpty {
-            await loadFromAnthropicAPI(apiKey: key)
-        } else {
-            loadFromLocalFiles()
+        await withTaskGroup(of: Void.self) { group in
+            group.addTask { self.loadFromLocalFiles() }
+            group.addTask { await self.loadUsageLimits() }
+            if let key = ProcessInfo.processInfo.environment["ANTHROPIC_ADMIN_KEY"], !key.isEmpty {
+                group.addTask { await self.loadFromAnthropicAPI(apiKey: key) }
+            }
         }
 
         lastUpdated = Date()
@@ -228,6 +265,61 @@ class DataProvider {
         if promSessions > 0 { todaySessions = promSessions }
     }
 
+    private func loadUsageLimits() async {
+        guard let token = readKeychainAccessToken() else { return }
+
+        let urlSession = URLSession(configuration: {
+            let config = URLSessionConfiguration.default
+            config.timeoutIntervalForRequest = 10
+            return config
+        }())
+
+        guard let url = URL(string: "https://api.anthropic.com/api/oauth/usage") else { return }
+        var request = URLRequest(url: url)
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
+        request.setValue("claude-code/2.0.32", forHTTPHeaderField: "User-Agent")
+
+        guard let (data, _) = try? await urlSession.data(for: request),
+              let response = try? JSONDecoder().decode(OAuthUsageResponse.self, from: data) else {
+            return
+        }
+
+        let iso = ISO8601DateFormatter()
+        iso.formatOptions = [.withInternetDateTime]
+
+        func makeWindow(_ raw: OAuthUsageWindow?, label: String) -> LimitWindow? {
+            guard let raw, let utilization = raw.utilization else { return nil }
+            let resetsAt = raw.resetsAt.flatMap { iso.date(from: $0) }
+            return LimitWindow(utilization: utilization, resetsAt: resetsAt, label: label)
+        }
+
+        usageLimits = [
+            makeWindow(response.fiveHour,     label: "5-hour"),
+            makeWindow(response.sevenDay,     label: "7-day"),
+            makeWindow(response.sevenDaySonnet, label: "Sonnet"),
+        ].compactMap { $0 }
+    }
+
+    private func readKeychainAccessToken() -> String? {
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: "/usr/bin/security")
+        proc.arguments = ["find-generic-password", "-s", "Claude Code-credentials", "-w"]
+        let pipe = Pipe()
+        proc.standardOutput = pipe
+        proc.standardError = Pipe()
+        guard (try? proc.run()) != nil else { return nil }
+        proc.waitUntilExit()
+        guard proc.terminationStatus == 0 else { return nil }
+        let output = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard let jsonData = output.data(using: .utf8),
+              let creds = try? JSONDecoder().decode(KeychainCredentials.self, from: jsonData) else {
+            return nil
+        }
+        return creds.claudeAiOauth?.accessToken
+    }
+
     private func loadFromAnthropicAPI(apiKey: String) async {
         let baseURL = "https://api.anthropic.com"
         let session = URLSession(configuration: {
@@ -259,6 +351,9 @@ class DataProvider {
                 }
             }
         }
+
+        // Only override local data if the API actually returned something
+        guard !modelMap.isEmpty else { return }
 
         todayTokens = totalInputTokens + totalOutputTokens
 
