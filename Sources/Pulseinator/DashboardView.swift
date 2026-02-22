@@ -1,8 +1,10 @@
 import SwiftUI
+import Charts
 
 struct DashboardView: View {
     @State private var data = DataProvider()
     @State private var signoz = SigNozClient()
+    private let timer = Timer.publish(every: 60, on: .main, in: .common).autoconnect()
 
     private let numberFormatter: NumberFormatter = {
         let f = NumberFormatter()
@@ -13,157 +15,191 @@ struct DashboardView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                usageSummarySection
-                modelBreakdownSection
-                usageLimitsSection
-                signozSection
-                bottomBar
+                topRow
+                Divider()
+                tokenChart
+                if !signoz.leverageSeries.isEmpty {
+                    leverageChart
+                }
+                costChart
+                Divider()
+                signozBar
+                lifetimeBar
             }
-            .padding(12)
+            .padding(16)
         }
-        .frame(width: 380)
-        .task {
-            await refresh()
+        .frame(width: 720)
+        .background(.ultraThinMaterial)
+        .task { await refresh() }
+        .onReceive(timer) { _ in Task { await refresh() } }
+    }
+
+    // MARK: - Top Row
+
+    private var topRow: some View {
+        HStack(alignment: .top, spacing: 16) {
+            usageLimitsPanel
+                .frame(maxWidth: .infinity)
+            Divider()
+            todayPanel
+                .frame(maxWidth: .infinity)
+            Divider()
+            modelsPanel
+                .frame(maxWidth: .infinity)
+        }
+        .frame(height: 160)
+    }
+
+    private var usageLimitsPanel: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Usage Limits")
+                .font(.headline)
+
+            if data.usageLimits.isEmpty {
+                Text("Keychain token unavailable")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+            } else {
+                ForEach(data.usageLimits, id: \.label) { limit in
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack {
+                            Text(limit.label)
+                                .font(.subheadline)
+                            Spacer()
+                            Text("\(Int(limit.utilization))%")
+                                .font(.title3)
+                                .fontWeight(.semibold)
+                                .foregroundStyle(limitColor(limit.utilization))
+                        }
+                        ProgressView(value: limit.utilization / 100)
+                            .progressViewStyle(.linear)
+                            .tint(limitColor(limit.utilization))
+                        if let resetsAt = limit.resetsAt {
+                            Text(resetCountdown(resetsAt))
+                                .font(.caption)
+                                .foregroundStyle(.tertiary)
+                        }
+                    }
+                }
+            }
         }
     }
 
-    private var usageSummarySection: some View {
-        VStack(alignment: .leading, spacing: 8) {
+    private var todayPanel: some View {
+        VStack(alignment: .leading, spacing: 6) {
             HStack {
-                Text("Today")
+                Text("Today  •  \(data.todayDate)")
                     .font(.headline)
                 Spacer()
-                Text(data.dataSource)
-                    .font(.caption2)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(
-                        data.dataSource == "API"
-                            ? Color.green.opacity(0.2)
-                            : Color.orange.opacity(0.2)
-                    )
-                    .foregroundStyle(
-                        data.dataSource == "API" ? Color.green : Color.orange
-                    )
-                    .clipShape(Capsule())
-            }
-
-            HStack(spacing: 8) {
-                UsageCard(
-                    title: "Messages",
-                    value: formatted(data.todayMessages),
-                    subtitle: data.todayDate,
-                    accentColor: .blue
-                )
-                UsageCard(
-                    title: "Sessions",
-                    value: formatted(data.todaySessions),
-                    subtitle: data.todayDate,
-                    accentColor: .purple
-                )
-                UsageCard(
-                    title: "Tokens",
-                    value: compactFormatted(data.todayTokens),
-                    subtitle: data.todayDate,
-                    accentColor: .teal
-                )
-            }
-
-            HStack(spacing: 16) {
-                weekStat(label: "Week messages", value: formatted(data.weekMessages))
-                Divider().frame(height: 16)
-                weekStat(label: "Week tokens", value: compactFormatted(data.weekTokens))
-                Spacer()
+                sourceBadge
                 if data.isLoading {
-                    ProgressView().scaleEffect(0.6)
+                    ProgressView().scaleEffect(0.5)
                 } else {
-                    Button {
-                        Task { await refresh() }
-                    } label: {
-                        Image(systemName: "arrow.clockwise")
-                            .font(.caption)
+                    Button { Task { await refresh() } } label: {
+                        Image(systemName: "arrow.clockwise").font(.caption)
                     }
                     .buttonStyle(.plain)
                     .foregroundStyle(.secondary)
                 }
             }
-            .padding(.top, 2)
+
+            statRow(label: "Messages", value: formatted(data.todayMessages))
+            statRow(label: "Sessions", value: formatted(data.todaySessions))
+            statRow(label: "Tokens", value: compactFormatted(data.todayTokens))
+
+            Divider()
+
+            statRow(label: "Week messages", value: formatted(data.weekMessages))
+            statRow(label: "Week tokens", value: compactFormatted(data.weekTokens))
         }
     }
 
-    private var modelBreakdownSection: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("Model Breakdown")
+    private var sourceBadge: some View {
+        Text(data.dataSource)
+            .font(.caption2)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(data.dataSource == "API" ? Color.green.opacity(0.2) : Color.orange.opacity(0.2))
+            .foregroundStyle(data.dataSource == "API" ? Color.green : Color.orange)
+            .clipShape(Capsule())
+    }
+
+    private var modelsPanel: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Models")
                 .font(.headline)
 
             if data.modelBreakdown.isEmpty {
-                Text("No model data available")
+                Text("No model data")
                     .font(.caption)
                     .foregroundStyle(.tertiary)
-                    .frame(maxWidth: .infinity, alignment: .center)
-                    .padding(.vertical, 8)
             } else {
-                let maxTokens = data.modelBreakdown.map(\.tokens).max() ?? 1
+                Chart(data.modelBreakdown) { model in
+                    BarMark(x: .value("Tokens", model.tokens))
+                        .foregroundStyle(by: .value("Model", shortModelName(model.name)))
+                }
+                .chartXAxis(.hidden)
+                .chartYAxis(.hidden)
+                .chartLegend(.hidden)
+                .frame(height: 28)
 
-                ForEach(data.modelBreakdown) { stat in
-                    VStack(alignment: .leading, spacing: 2) {
-                        HStack {
-                            Text(shortModelName(stat.name))
-                                .font(.caption)
-                                .foregroundStyle(.primary)
-                            Spacer()
-                            Text(compactFormatted(stat.tokens))
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                        GeometryReader { geo in
-                            RoundedRectangle(cornerRadius: 2)
-                                .fill(colorForName(stat.color).opacity(0.7))
-                                .frame(
-                                    width: geo.size.width * CGFloat(stat.tokens) / CGFloat(max(maxTokens, 1)),
-                                    height: 4
-                                )
-                        }
-                        .frame(height: 4)
+                ForEach(data.modelBreakdown) { model in
+                    HStack(spacing: 4) {
+                        Circle()
+                            .fill(colorForName(model.color))
+                            .frame(width: 6, height: 6)
+                        Text(shortModelName(model.name))
+                            .font(.caption)
+                            .foregroundStyle(.primary)
+                            .lineLimit(1)
+                        Spacer()
+                        Text(compactFormatted(model.tokens))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
                 }
             }
         }
     }
 
-    private var usageLimitsSection: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("Usage Limits")
+    // MARK: - Full-width Charts
+
+    private var tokenChart: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Token Usage (\(signoz.selectedWindow.rawValue))")
                 .font(.headline)
 
-            if data.usageLimits.isEmpty {
-                Text("No limit data — keychain token unavailable")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
-                    .frame(maxWidth: .infinity, alignment: .center)
-                    .padding(.vertical, 8)
+            if signoz.tokenSeries.isEmpty {
+                noDataPlaceholder
             } else {
-                ForEach(data.usageLimits, id: \.label) { limit in
-                    VStack(alignment: .leading, spacing: 3) {
-                        HStack {
-                            Text(limit.label)
-                                .font(.caption)
-                                .foregroundStyle(.primary)
-                            Spacer()
-                            if let resetsAt = limit.resetsAt {
-                                Text(resetCountdown(resetsAt))
+                Chart(signoz.tokenSeries) { point in
+                    AreaMark(
+                        x: .value("Time", point.date),
+                        y: .value("Tokens", point.value)
+                    )
+                    .foregroundStyle(.blue.opacity(0.25))
+                    LineMark(
+                        x: .value("Time", point.date),
+                        y: .value("Tokens", point.value)
+                    )
+                    .foregroundStyle(.blue)
+                    .lineStyle(StrokeStyle(lineWidth: 1.5))
+                }
+                .frame(height: 140)
+                .chartXAxis {
+                    AxisMarks(values: .stride(by: .hour, count: signoz.selectedWindow.strideHours)) {
+                        AxisGridLine()
+                        AxisValueLabel(format: .dateTime.hour())
+                    }
+                }
+                .chartYAxis {
+                    AxisMarks { value in
+                        AxisGridLine()
+                        AxisValueLabel {
+                            if let v = value.as(Double.self) {
+                                Text(compactFormatted(Int(v)))
                                     .font(.caption2)
-                                    .foregroundStyle(.tertiary)
                             }
-                        }
-                        HStack(spacing: 8) {
-                            ProgressView(value: limit.utilization / 100)
-                                .progressViewStyle(.linear)
-                                .tint(limitColor(limit.utilization))
-                            Text("\(Int(limit.utilization))%")
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                                .frame(width: 30, alignment: .trailing)
                         }
                     }
                 }
@@ -171,124 +207,183 @@ struct DashboardView: View {
         }
     }
 
-    private var signozSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text("SigNoz · Claude Code")
-                    .font(.headline)
-                Spacer()
-                Picker("Window", selection: $signoz.selectedWindow) {
-                    ForEach(SigNozClient.TimeWindow.allCases, id: \.self) { window in
-                        Text(window.rawValue).tag(window)
+    private var leverageChart: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Leverage — CLI:User time ratio (\(signoz.selectedWindow.rawValue))")
+                .font(.headline)
+
+            Chart(signoz.leverageSeries) { point in
+                LineMark(
+                    x: .value("Time", point.date),
+                    y: .value("Ratio", point.value)
+                )
+                .foregroundStyle(.green)
+                .lineStyle(StrokeStyle(lineWidth: 1.5))
+                AreaMark(
+                    x: .value("Time", point.date),
+                    y: .value("Ratio", point.value)
+                )
+                .foregroundStyle(.green.opacity(0.15))
+            }
+            .frame(height: 140)
+            .chartXAxis {
+                AxisMarks(values: .stride(by: .hour, count: signoz.selectedWindow.strideHours)) {
+                    AxisGridLine()
+                    AxisValueLabel(format: .dateTime.hour())
+                }
+            }
+            .chartYAxis {
+                AxisMarks { value in
+                    AxisGridLine()
+                    AxisValueLabel {
+                        if let v = value.as(Double.self) {
+                            Text(String(format: "%.1f×", v))
+                                .font(.caption2)
+                        }
                     }
                 }
-                .pickerStyle(.segmented)
-                .frame(width: 160)
-                .onChange(of: signoz.selectedWindow) {
-                    Task { await signoz.refresh() }
+            }
+        }
+    }
+
+    private var costChart: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Cost (\(signoz.selectedWindow.rawValue))")
+                .font(.headline)
+
+            if signoz.costSeries.isEmpty {
+                noDataPlaceholder
+            } else {
+                Chart(signoz.costSeries) { point in
+                    AreaMark(
+                        x: .value("Time", point.date),
+                        y: .value("USD", point.value)
+                    )
+                    .foregroundStyle(.purple.opacity(0.25))
+                    LineMark(
+                        x: .value("Time", point.date),
+                        y: .value("USD", point.value)
+                    )
+                    .foregroundStyle(.purple)
+                    .lineStyle(StrokeStyle(lineWidth: 1.5))
                 }
+                .frame(height: 140)
+                .chartXAxis {
+                    AxisMarks(values: .stride(by: .hour, count: signoz.selectedWindow.strideHours)) {
+                        AxisGridLine()
+                        AxisValueLabel(format: .dateTime.hour())
+                    }
+                }
+                .chartYAxis {
+                    AxisMarks { value in
+                        AxisGridLine()
+                        AxisValueLabel {
+                            if let v = value.as(Double.self) {
+                                Text(String(format: "$%.2f", v))
+                                    .font(.caption2)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private var noDataPlaceholder: some View {
+        Text("No SigNoz data")
+            .font(.caption)
+            .foregroundStyle(.tertiary)
+            .frame(maxWidth: .infinity, minHeight: 140, alignment: .center)
+            .background(Color.secondary.opacity(0.05))
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+
+    // MARK: - SigNoz Bar
+
+    private var signozBar: some View {
+        HStack(spacing: 12) {
+            Picker("Window", selection: $signoz.selectedWindow) {
+                ForEach(SigNozClient.TimeWindow.allCases, id: \.self) { window in
+                    Text(window.rawValue).tag(window)
+                }
+            }
+            .pickerStyle(.segmented)
+            .frame(width: 160)
+            .onChange(of: signoz.selectedWindow) {
+                Task { await signoz.refresh() }
             }
 
             if signoz.isAvailable {
-                let win = signoz.selectedWindow.rawValue
-                VStack(spacing: 8) {
-                    HStack(spacing: 8) {
-                        UsageCard(
-                            title: "Sessions",
-                            value: "\(signoz.sessions)",
-                            subtitle: win,
-                            accentColor: .purple
-                        )
-                        UsageCard(
-                            title: "Tokens",
-                            value: compactFormatted(Int(signoz.tokens)),
-                            subtitle: win,
-                            accentColor: .blue
-                        )
-                        UsageCard(
-                            title: "Cost",
-                            value: String(format: "$%.2f", signoz.costUSD),
-                            subtitle: win,
-                            accentColor: .green
-                        )
-                    }
-                    HStack(spacing: 8) {
-                        UsageCard(
-                            title: "Lines",
-                            value: "\(signoz.linesChanged)",
-                            subtitle: win,
-                            accentColor: .teal
-                        )
-                        UsageCard(
-                            title: "Commits",
-                            value: "\(signoz.commits)",
-                            subtitle: win,
-                            accentColor: .orange
-                        )
-                        UsageCard(
-                            title: "Decisions",
-                            value: "\(signoz.decisions)",
-                            subtitle: win,
-                            accentColor: .indigo
-                        )
-                    }
-                }
+                Divider().frame(height: 20)
+                signozStat(label: "Sessions", value: "\(signoz.sessions)")
+                signozStat(label: "Tokens", value: compactFormatted(Int(signoz.tokens)))
+                signozStat(label: "Cost", value: String(format: "$%.2f", signoz.costUSD))
+                signozStat(label: "Lines", value: formatted(signoz.linesChanged))
+                signozStat(label: "Commits", value: "\(signoz.commits)")
+                signozStat(label: "Decisions", value: "\(signoz.decisions)")
             } else {
                 Text("SigNoz offline")
                     .font(.caption)
                     .foregroundStyle(.tertiary)
-                    .frame(maxWidth: .infinity, alignment: .center)
-                    .padding(.vertical, 12)
             }
+
+            Spacer()
         }
     }
 
-    private var bottomBar: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Divider()
+    // MARK: - Lifetime Bar
 
-            HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Lifetime")
-                        .font(.caption2)
+    private var lifetimeBar: some View {
+        HStack {
+            HStack(spacing: 6) {
+                Text(formatted(data.lifetimeSessions))
+                    .font(.body).fontWeight(.semibold)
+                Text("sessions")
+                    .font(.caption).foregroundStyle(.secondary)
+                Text("·")
+                    .foregroundStyle(.tertiary)
+                Text(formatted(data.lifetimeMessages))
+                    .font(.body).fontWeight(.semibold)
+                Text("messages")
+                    .font(.caption).foregroundStyle(.secondary)
+                if data.firstSessionDate != "—" {
+                    Text("·")
                         .foregroundStyle(.tertiary)
-                    HStack(spacing: 8) {
-                        Text("\(formatted(data.lifetimeSessions)) sessions")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        Text("\(formatted(data.lifetimeMessages)) messages")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    if data.firstSessionDate != "—" {
-                        Text("Since \(data.firstSessionDate)")
-                            .font(.caption2)
-                            .foregroundStyle(.tertiary)
-                    }
-                }
-
-                Spacer()
-
-                VStack(alignment: .trailing, spacing: 2) {
-                    Text("Updated")
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                    Text(data.lastUpdated, style: .time)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    Text("Since \(data.firstSessionDate)")
+                        .font(.caption).foregroundStyle(.secondary)
                 }
             }
-        }
-    }
 
-    private func weekStat(label: String, value: String) -> some View {
-        VStack(alignment: .leading, spacing: 1) {
-            Text(label)
-                .font(.caption2)
+            Spacer()
+
+            Text(data.lastUpdated, style: .time)
+                .font(.caption)
                 .foregroundStyle(.tertiary)
-            Text(value)
+        }
+    }
+
+    // MARK: - Helpers
+
+    private func statRow(label: String, value: String) -> some View {
+        HStack {
+            Text(label)
                 .font(.caption)
                 .foregroundStyle(.secondary)
+            Spacer()
+            Text(value)
+                .font(.title2)
+                .fontWeight(.bold)
+        }
+    }
+
+    private func signozStat(label: String, value: String) -> some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text(label)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Text(value)
+                .font(.body)
+                .fontWeight(.semibold)
         }
     }
 
@@ -304,38 +399,35 @@ struct DashboardView: View {
 
     private func compactFormatted(_ value: Int) -> String {
         switch value {
-        case 0..<1_000: return "\(value)"
+        case 0..<1_000:       return "\(value)"
         case 1_000..<1_000_000: return String(format: "%.1fK", Double(value) / 1_000)
-        default: return String(format: "%.1fM", Double(value) / 1_000_000)
+        default:              return String(format: "%.1fM", Double(value) / 1_000_000)
         }
     }
 
     private func shortModelName(_ name: String) -> String {
-        name
-            .replacingOccurrences(of: "claude-", with: "")
-            .replacingOccurrences(of: "-20", with: " '")
-            .appending(name.contains("-20") ? "" : "")
+        name.replacingOccurrences(of: "claude-", with: "")
     }
 
     private func colorForName(_ name: String) -> Color {
         switch name {
-        case "blue": return .blue
+        case "blue":   return .blue
         case "purple": return .purple
-        case "green": return .green
+        case "green":  return .green
         case "orange": return .orange
-        case "red": return .red
-        case "teal": return .teal
+        case "red":    return .red
+        case "teal":   return .teal
         case "indigo": return .indigo
-        case "cyan": return .cyan
-        default: return .blue
+        case "cyan":   return .cyan
+        default:       return .blue
         }
     }
 
     private func limitColor(_ utilization: Double) -> Color {
         switch utilization {
-        case ..<50: return .green
+        case ..<50:   return .green
         case 50..<80: return .yellow
-        default: return .red
+        default:      return .red
         }
     }
 
@@ -344,10 +436,6 @@ struct DashboardView: View {
         guard seconds > 0 else { return "resetting…" }
         let hours = Int(seconds) / 3600
         let minutes = (Int(seconds) % 3600) / 60
-        if hours > 0 {
-            return "resets in \(hours)h \(minutes)m"
-        } else {
-            return "resets in \(minutes)m"
-        }
+        return hours > 0 ? "resets in \(hours)h \(minutes)m" : "resets in \(minutes)m"
     }
 }
