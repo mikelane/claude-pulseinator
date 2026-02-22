@@ -68,7 +68,14 @@ class SigNozClient {
     }
 
     private let baseURL = "http://127.0.0.1:8080"
-    private let apiKey = "<YOUR_SIGNOZ_API_KEY>"
+
+    // API key: set SIGNOZ_API_KEY env var, or write to ~/.config/pulseinator/signoz_api_key
+    private var apiKey: String {
+        if let key = ProcessInfo.processInfo.environment["SIGNOZ_API_KEY"], !key.isEmpty { return key }
+        let path = NSHomeDirectory() + "/.config/pulseinator/signoz_api_key"
+        if let key = try? String(contentsOfFile: path, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines), !key.isEmpty { return key }
+        return ""
+    }
 
     private let urlSession: URLSession = {
         let config = URLSessionConfiguration.default
