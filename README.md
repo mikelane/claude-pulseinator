@@ -4,7 +4,7 @@
 
 Native macOS menubar app (Swift/SwiftUI) showing Claude Code usage stats. Sits in your menubar as Ψ and opens a 720pt-wide popup.
 
-![Pulseinator screenshot](screenshot.png)
+<img width="752" height="875" alt="Screenshot 2026-02-21 at 22 01 32" src="https://github.com/user-attachments/assets/1f6607e5-ec3c-4384-b111-9a734b975359" />
 
 ## What's in the popup
 
