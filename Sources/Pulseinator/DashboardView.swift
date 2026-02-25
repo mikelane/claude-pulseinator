@@ -45,7 +45,7 @@ struct DashboardView: View {
             modelsPanel
                 .frame(maxWidth: .infinity)
         }
-        .frame(height: 160)
+        .frame(height: 200)
     }
 
     private var usageLimitsPanel: some View {
@@ -432,8 +432,29 @@ struct DashboardView: View {
     private func resetCountdown(_ date: Date) -> String {
         let seconds = date.timeIntervalSinceNow
         guard seconds > 0 else { return "resetting…" }
-        let hours = Int(seconds) / 3600
+        let totalHours = Int(seconds) / 3600
+        let days = totalHours / 24
+        let hours = totalHours % 24
         let minutes = (Int(seconds) % 3600) / 60
-        return hours > 0 ? "resets in \(hours)h \(minutes)m" : "resets in \(minutes)m"
+
+        let countdown: String
+        if days > 0 {
+            countdown = "resets in \(days)d \(hours)h"
+        } else if hours > 0 {
+            countdown = "resets in \(hours)h \(minutes)m"
+        } else {
+            countdown = "resets in \(minutes)m"
+        }
+
+        let formatter = DateFormatter()
+        if Calendar.current.isDateInToday(date) {
+            formatter.dateFormat = "h:mma"
+        } else {
+            formatter.dateFormat = "MMM d, h:mma"
+        }
+        formatter.amSymbol = "am"
+        formatter.pmSymbol = "pm"
+
+        return "\(countdown) · \(formatter.string(from: date))"
     }
 }

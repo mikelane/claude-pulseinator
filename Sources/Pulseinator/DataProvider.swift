@@ -285,12 +285,18 @@ class DataProvider {
             return
         }
 
-        let iso = ISO8601DateFormatter()
-        iso.formatOptions = [.withInternetDateTime]
+        let isoFractional = ISO8601DateFormatter()
+        isoFractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let isoPlain = ISO8601DateFormatter()
+        isoPlain.formatOptions = [.withInternetDateTime]
+
+        func parseDate(_ s: String) -> Date? {
+            isoFractional.date(from: s) ?? isoPlain.date(from: s)
+        }
 
         func makeWindow(_ raw: OAuthUsageWindow?, label: String) -> LimitWindow? {
             guard let raw, let utilization = raw.utilization else { return nil }
-            let resetsAt = raw.resetsAt.flatMap { iso.date(from: $0) }
+            let resetsAt = raw.resetsAt.flatMap { parseDate($0) }
             return LimitWindow(utilization: utilization, resetsAt: resetsAt, label: label)
         }
 
@@ -302,6 +308,15 @@ class DataProvider {
     }
 
     private func readKeychainAccessToken() -> String? {
+        // ~/.claude/.credentials.json is always complete; the keychain entry can be truncated
+        let credPath = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".claude/.credentials.json")
+        if let data = try? Data(contentsOf: credPath),
+           let creds = try? JSONDecoder().decode(KeychainCredentials.self, from: data) {
+            return creds.claudeAiOauth?.accessToken
+        }
+
+        // Fallback: keychain subprocess
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: "/usr/bin/security")
         proc.arguments = ["find-generic-password", "-s", "Claude Code-credentials", "-w"]
