@@ -46,13 +46,13 @@ class SigNozClient {
             }
         }
 
-        // Series step — ~60 points across the window
+        // Series step — finer resolution for longer windows
         var seriesStepSeconds: Int {
             switch self {
-            case .oneHour:         return 60
-            case .threeHours:      return 180
-            case .twelveHours:     return 720
-            case .twentyFourHours: return 1440
+            case .oneHour:         return 60    // 1 min → 60 pts
+            case .threeHours:      return 60    // 1 min → 180 pts
+            case .twelveHours:     return 120   // 2 min → 360 pts
+            case .twentyFourHours: return 300   // 5 min → 288 pts
             }
         }
 
