@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 @main
 struct PulseinatorApp: App {
@@ -9,43 +10,37 @@ struct PulseinatorApp: App {
         MenuBarExtra {
             DashboardView(data: data, signoz: signoz)
         } label: {
-            LimitBarsLabel(limits: data.usageLimits)
+            Image(nsImage: limitBarsImage(for: data.usageLimits))
         }
         .menuBarExtraStyle(.window)
     }
-}
 
-// MARK: - Menu bar label
+    private func limitBarsImage(for limits: [LimitWindow]) -> NSImage {
+        let barW: CGFloat = 5
+        let barH: CGFloat = 14
+        let gap: CGFloat = 3
+        let imgW = barW * 2 + gap
 
-struct LimitBarsLabel: View {
-    let limits: [LimitWindow]
+        let image = NSImage(size: NSSize(width: imgW, height: barH), flipped: false) { _ in
+            for (i, label) in ["5-hour", "7-day"].enumerated() {
+                let util = limits.first(where: { $0.label == label })?.utilization ?? 0
+                let t = CGFloat(max(0, min(100, util))) / 100
+                let x = CGFloat(i) * (barW + gap)
 
-    var body: some View {
-        HStack(spacing: 3) {
-            MiniBar(utilization: limits.first(where: { $0.label == "5-hour" })?.utilization ?? 0)
-            MiniBar(utilization: limits.first(where: { $0.label == "7-day" })?.utilization ?? 0)
-        }
-        .frame(width: 16, height: 14)
-    }
-}
+                // Track
+                NSColor.secondaryLabelColor.setFill()
+                NSBezierPath(roundedRect: NSRect(x: x, y: 0, width: barW, height: barH),
+                             xRadius: 1.5, yRadius: 1.5).fill()
 
-struct MiniBar: View {
-    let utilization: Double
-
-    var body: some View {
-        GeometryReader { geo in
-            ZStack(alignment: .bottom) {
-                RoundedRectangle(cornerRadius: 1.5)
-                    .fill(.white.opacity(0.2))
-                RoundedRectangle(cornerRadius: 1.5)
-                    .fill(barColor)
-                    .frame(height: geo.size.height * max(0.04, utilization / 100))
+                // Fill — green → yellow → orange → red via hue lerp
+                let fillH = max(2, barH * t)
+                NSColor(hue: 0.33 * (1 - t), saturation: 0.9, brightness: 0.75, alpha: 1).setFill()
+                NSBezierPath(roundedRect: NSRect(x: x, y: 0, width: barW, height: fillH),
+                             xRadius: 1.5, yRadius: 1.5).fill()
             }
+            return true
         }
-    }
-
-    private var barColor: Color {
-        let t = max(0, min(100, utilization)) / 100
-        return Color(hue: 0.33 * (1 - t), saturation: 0.85, brightness: 0.95)
+        image.isTemplate = false
+        return image
     }
 }
