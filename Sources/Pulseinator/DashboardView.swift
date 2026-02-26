@@ -2,8 +2,8 @@ import SwiftUI
 import Charts
 
 struct DashboardView: View {
-    @State private var data = DataProvider()
-    @State private var signoz = SigNozClient()
+    var data: DataProvider
+    @Bindable var signoz: SigNozClient
     private let timer = Timer.publish(every: 60, on: .main, in: .common).autoconnect()
 
     private let numberFormatter: NumberFormatter = {
