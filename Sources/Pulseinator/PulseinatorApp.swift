@@ -15,6 +15,36 @@ struct PulseinatorApp: App {
         .menuBarExtraStyle(.window)
     }
 
+    private func limitNSColor(for limit: LimitWindow?) -> NSColor {
+        let green  = NSColor(calibratedRed: 95/255,  green: 1.0,      blue: 0,      alpha: 1)
+        let yellow = NSColor(calibratedRed: 1.0,     green: 215/255,  blue: 0,      alpha: 1)
+        let red    = NSColor(calibratedRed: 1.0,     green: 95/255,   blue: 95/255, alpha: 1)
+
+        guard let limit = limit else { return green }
+
+        let windowSeconds: Double
+        switch limit.label {
+        case "5-hour": windowSeconds = 5 * 3600
+        case "7-day":  windowSeconds = 7 * 24 * 3600
+        default:       windowSeconds = 0
+        }
+
+        if let resetsAt = limit.resetsAt, windowSeconds > 0 {
+            let secondsRemaining = max(0, resetsAt.timeIntervalSinceNow)
+            let elapsedPct = (windowSeconds - secondsRemaining) / windowSeconds * 100
+            let paceDelta = limit.utilization - elapsedPct
+            if paceDelta <= 0  { return green }
+            if paceDelta <= 15 { return yellow }
+            return red
+        }
+
+        switch limit.utilization {
+        case ..<75:   return green
+        case 75..<90: return yellow
+        default:      return red
+        }
+    }
+
     private func limitBarsImage(for limits: [LimitWindow]) -> NSImage {
         let barW: CGFloat = 5
         let barH: CGFloat = 14
@@ -23,7 +53,8 @@ struct PulseinatorApp: App {
 
         let image = NSImage(size: NSSize(width: imgW, height: barH), flipped: false) { _ in
             for (i, label) in ["5-hour", "7-day"].enumerated() {
-                let util = limits.first(where: { $0.label == label })?.utilization ?? 0
+                let limit = limits.first(where: { $0.label == label })
+                let util = limit?.utilization ?? 0
                 let t = CGFloat(max(0, min(100, util))) / 100
                 let x = CGFloat(i) * (barW + gap)
 
@@ -32,9 +63,9 @@ struct PulseinatorApp: App {
                 NSBezierPath(roundedRect: NSRect(x: x, y: 0, width: barW, height: barH),
                              xRadius: 1.5, yRadius: 1.5).fill()
 
-                // Fill — green → yellow → orange → red via hue lerp
+                // Fill — pace-based color matching statusline
                 let fillH = max(2, barH * t)
-                NSColor(hue: 0.33 * (1 - t), saturation: 0.9, brightness: 0.75, alpha: 1).setFill()
+                limitNSColor(for: limit).setFill()
                 NSBezierPath(roundedRect: NSRect(x: x, y: 0, width: barW, height: fillH),
                              xRadius: 1.5, yRadius: 1.5).fill()
             }

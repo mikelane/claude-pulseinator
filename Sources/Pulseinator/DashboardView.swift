@@ -67,11 +67,11 @@ struct DashboardView: View {
                             Text("\(Int(limit.utilization))%")
                                 .font(.title3)
                                 .fontWeight(.semibold)
-                                .foregroundStyle(limitColor(limit.utilization))
+                                .foregroundStyle(limitColor(limit))
                         }
                         ProgressView(value: limit.utilization / 100)
                             .progressViewStyle(.linear)
-                            .tint(limitColor(limit.utilization))
+                            .tint(limitColor(limit))
                         if let resetsAt = limit.resetsAt {
                             Text(resetCountdown(resetsAt))
                                 .font(.caption)
@@ -421,11 +421,31 @@ struct DashboardView: View {
         }
     }
 
-    private func limitColor(_ utilization: Double) -> Color {
-        switch utilization {
-        case ..<50:   return .green
-        case 50..<80: return .yellow
-        default:      return .red
+    private func limitColor(_ limit: LimitWindow) -> Color {
+        let green  = Color(red: 95/255,  green: 1.0,        blue: 0)
+        let yellow = Color(red: 1.0,     green: 215/255,    blue: 0)
+        let red    = Color(red: 1.0,     green: 95/255,     blue: 95/255)
+
+        let windowSeconds: Double
+        switch limit.label {
+        case "5-hour": windowSeconds = 5 * 3600
+        case "7-day":  windowSeconds = 7 * 24 * 3600
+        default:       windowSeconds = 0
+        }
+
+        if let resetsAt = limit.resetsAt, windowSeconds > 0 {
+            let secondsRemaining = max(0, resetsAt.timeIntervalSinceNow)
+            let elapsedPct = (windowSeconds - secondsRemaining) / windowSeconds * 100
+            let paceDelta = limit.utilization - elapsedPct
+            if paceDelta <= 0  { return green }
+            if paceDelta <= 15 { return yellow }
+            return red
+        }
+
+        switch limit.utilization {
+        case ..<75:   return green
+        case 75..<90: return yellow
+        default:      return red
         }
     }
 
