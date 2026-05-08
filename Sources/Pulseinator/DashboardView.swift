@@ -422,10 +422,6 @@ struct DashboardView: View {
     }
 
     private func limitColor(_ limit: LimitWindow) -> Color {
-        let green  = Color(red: 95/255,  green: 1.0,        blue: 0)
-        let yellow = Color(red: 1.0,     green: 215/255,    blue: 0)
-        let red    = Color(red: 1.0,     green: 95/255,     blue: 95/255)
-
         let windowSeconds: Double
         switch limit.label {
         case "5-hour": windowSeconds = 5 * 3600
@@ -437,15 +433,15 @@ struct DashboardView: View {
             let secondsRemaining = max(0, resetsAt.timeIntervalSinceNow)
             let elapsedPct = (windowSeconds - secondsRemaining) / windowSeconds * 100
             let paceDelta = limit.utilization - elapsedPct
-            if paceDelta <= 0  { return green }
-            if paceDelta <= 15 { return yellow }
-            return red
+            if paceDelta <= 0  { return .green }
+            if paceDelta <= 15 { return .orange }
+            return .red
         }
 
         switch limit.utilization {
-        case ..<75:   return green
-        case 75..<90: return yellow
-        default:      return red
+        case ..<75:   return .green
+        case 75..<90: return .orange
+        default:      return .red
         }
     }
 

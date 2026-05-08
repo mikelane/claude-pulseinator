@@ -16,11 +16,7 @@ struct PulseinatorApp: App {
     }
 
     private func limitNSColor(for limit: LimitWindow?) -> NSColor {
-        let green  = NSColor(calibratedRed: 95/255,  green: 1.0,      blue: 0,      alpha: 1)
-        let yellow = NSColor(calibratedRed: 1.0,     green: 215/255,  blue: 0,      alpha: 1)
-        let red    = NSColor(calibratedRed: 1.0,     green: 95/255,   blue: 95/255, alpha: 1)
-
-        guard let limit = limit else { return green }
+        guard let limit = limit else { return .systemGreen }
 
         let windowSeconds: Double
         switch limit.label {
@@ -33,15 +29,15 @@ struct PulseinatorApp: App {
             let secondsRemaining = max(0, resetsAt.timeIntervalSinceNow)
             let elapsedPct = (windowSeconds - secondsRemaining) / windowSeconds * 100
             let paceDelta = limit.utilization - elapsedPct
-            if paceDelta <= 0  { return green }
-            if paceDelta <= 15 { return yellow }
-            return red
+            if paceDelta <= 0  { return .systemGreen }
+            if paceDelta <= 15 { return .systemOrange }
+            return .systemRed
         }
 
         switch limit.utilization {
-        case ..<75:   return green
-        case 75..<90: return yellow
-        default:      return red
+        case ..<75:   return .systemGreen
+        case 75..<90: return .systemOrange
+        default:      return .systemRed
         }
     }
 
